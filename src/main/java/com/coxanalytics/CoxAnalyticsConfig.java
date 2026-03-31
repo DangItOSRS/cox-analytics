@@ -147,6 +147,18 @@ public interface CoxAnalyticsConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(
+			keyName = "exportDate",
+			name = "Export Date",
+			description = "Includes a date with each exported time in the 'cox-analytics' folder in .runelite",
+			position = 7,
+			section = timerSection
+	)
+	default boolean exportDates()
+	{
+		return false;
+	}
+
 	//Font Section
 	@ConfigItem(
 		name = "Font Type",
