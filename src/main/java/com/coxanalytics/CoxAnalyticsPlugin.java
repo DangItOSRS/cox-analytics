@@ -686,11 +686,21 @@ public class CoxAnalyticsPlugin extends Plugin
 
 		try (FileWriter writer = new FileWriter(file, true))
 		{
-			String output = splits.replace("<br>", "\r\n") + "\r\n" +
-					"------------------------------------------------------------------------------------------------\r\n" +
-					"------------------------------------------------------------------------------------------------\r\n";
+			// Basic splits data
+			StringBuilder output = new StringBuilder(splits.replace("<br>", "\r\n"));
 
-			writer.write(output);
+			// Conditional Date Export
+			if (config.exportDates())
+			{
+				output.append("\r\nDate: ").append(java.time.LocalDate.now());
+			}
+
+			// Separator lines
+			output.append("\r\n")
+					.append("------------------------------------------------------------------------------------------------\r\n")
+					.append("------------------------------------------------------------------------------------------------\r\n");
+
+			writer.write(output.toString());
 		}
 		catch (IOException e)
 		{
