@@ -3,7 +3,6 @@ plugins {
 }
 
 repositories {
-	mavenLocal()
 	maven {
 		url = 'https://repo.runelite.net'
 	}
@@ -24,7 +23,7 @@ dependencies {
 }
 
 group = 'com.coxanalytics'
-version = '1.0.2'
+version = '1.0.3'
 sourceCompatibility = '1.8'
 
 tasks.withType(JavaCompile) {

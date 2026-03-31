@@ -173,7 +173,7 @@ public class CoxAnalyticsPlugin extends Plugin
 	public int mageStart = -1;
 
 	@Getter
-	private static final File TIMES_DIR = new File(RuneLite.RUNELITE_DIR.getPath() + File.separator + "cox-analytics");
+	private static final File TIMES_DIR = new File(RuneLite.RUNELITE_DIR, "cox-analytics");
 
 	@Provides
 	CoxAnalyticsConfig provideConfig(ConfigManager configManager)
@@ -187,10 +187,6 @@ public class CoxAnalyticsPlugin extends Plugin
 		buildPanel();
 		overlayManager.add(overlay);
 		clientThread.invoke(() -> hideWidget(config.replaceWidget()));
-		if (!TIMES_DIR.exists())
-		{
-			TIMES_DIR.mkdirs();
-		}
 	}
 
 	@Override
@@ -677,28 +673,28 @@ public class CoxAnalyticsPlugin extends Plugin
 		pointsPanel.setSplits(splits);
 	}
 
-	private void exportTimes(boolean cm) throws Exception
+	private void exportTimes(boolean cm) throws IOException
 	{
-		String fileName = "";
-		if (cm)
+		if (!TIMES_DIR.exists() && !TIMES_DIR.mkdirs())
 		{
-			fileName = TIMES_DIR + "\\" + client.getLocalPlayer().getName() + "_CmTimes.txt";
+			return;
 		}
-		else
+
+		String suffix = cm ? "_CmTimes.txt" : "_CoxTimes.txt";
+		String fileName = client.getLocalPlayer().getName() + suffix;
+		File file = TIMES_DIR.toPath().resolve(fileName).toFile();
+
+		try (FileWriter writer = new FileWriter(file, true))
 		{
-			fileName = TIMES_DIR + "\\" + client.getLocalPlayer().getName() + "_CoxTimes.txt";
-		}
-		FileWriter writer = new FileWriter(fileName, true);
-		try
-		{
-			writer.write(splits.replace("<br>", "\r\n") + "\r\n" +
-				"------------------------------------------------------------------------------------------------\r\n" +
-				"------------------------------------------------------------------------------------------------\r\n");
+			String output = splits.replace("<br>", "\r\n") + "\r\n" +
+					"------------------------------------------------------------------------------------------------\r\n" +
+					"------------------------------------------------------------------------------------------------\r\n";
+
+			writer.write(output);
 		}
 		catch (IOException e)
 		{
-			e.printStackTrace();
+			log.error("Could not export CoX times", e);
 		}
-		writer.close();
 	}
 }
