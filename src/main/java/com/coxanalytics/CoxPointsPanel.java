@@ -394,8 +394,8 @@ public class CoxPointsPanel extends PluginPanel
 				ex.printStackTrace();
 			}
 		});
-		githubButton.addActionListener(e -> LinkBrowser.browse("https://github.com/MoreBuchus/buchus-plugins"));
-		discordButton.addActionListener(e -> LinkBrowser.browse("https://discord.gg/mfw63tG9js"));
+		githubButton.addActionListener(e -> LinkBrowser.browse("https://github.com/DangItOSRS/cox-analytics"));
+		discordButton.addActionListener(e -> LinkBrowser.browse("https://discord.com/users/254771832022892544"));
 
 		supportInfobox.add(folderButton);
 		supportInfobox.add(githubButton);
