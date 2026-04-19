@@ -62,6 +62,13 @@ public interface CoxAnalyticsConfig extends Config
 	)
 	String panelSection = "panel";
 
+	@ConfigSection(
+			name = "Party",
+			description = "Party Options",
+			position = 3
+	)
+	String partySection = "party";
+
 	//Timer Section
 	@ConfigItem(
 		keyName = "replaceWidget",
@@ -256,5 +263,30 @@ public interface CoxAnalyticsConfig extends Config
 	default int panelPriority()
 	{
 		return 9;
+	}
+
+	// Party Section
+	@ConfigItem(
+			name = "Send Splits to Party",
+			keyName = "sendPartySplits",
+			description = "Send each room time to the party to provide times to logged out team members.",
+			position = 1,
+			section = partySection
+	)
+	default boolean sendPartySplits()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+			name = "Accept Party Splits",
+			keyName = "acceptPartySplits",
+			description = "When times are missing or incorrect due to logout, accept splits from party members.",
+			position = 2,
+			section = partySection
+	)
+	default boolean acceptPartySplits()
+	{
+		return false;
 	}
 }
