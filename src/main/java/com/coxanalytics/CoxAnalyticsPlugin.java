@@ -27,6 +27,7 @@
 package com.coxanalytics;
 
 import com.coxanalytics.config.TimeStyle;
+import com.coxanalytics.party.CoxTimePacket;
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -63,6 +64,8 @@ import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.party.PartyService;
+import net.runelite.client.party.WSClient;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.PluginManager;
@@ -109,6 +112,12 @@ public class CoxAnalyticsPlugin extends Plugin
 
 	@Inject
 	private PluginManager pluginManager;
+
+	@Inject
+	private PartyService partyService;
+
+	@Inject
+	private WSClient wsClient;
 
 	private CoxPointsPanel pointsPanel;
 
@@ -172,6 +181,9 @@ public class CoxAnalyticsPlugin extends Plugin
 	public int olmPhase = 0;
 	public int mageStart = -1;
 
+	private String lastRecordedRoom = "";
+	private String lastSeenRoom = "";
+
 	@Getter
 	private static final File TIMES_DIR = new File(RuneLite.RUNELITE_DIR, "cox-analytics");
 
@@ -187,6 +199,8 @@ public class CoxAnalyticsPlugin extends Plugin
 		buildPanel();
 		overlayManager.add(overlay);
 		clientThread.invoke(() -> hideWidget(config.replaceWidget()));
+
+		wsClient.registerMessage(CoxTimePacket.class);
 	}
 
 	@Override
@@ -228,6 +242,8 @@ public class CoxAnalyticsPlugin extends Plugin
 		splits = "";
 		splitTicks = 0;
 		mageStart = -1;
+		lastRecordedRoom = "";
+		lastSeenRoom = "";
 	}
 
 	private void buildPanel()
@@ -354,48 +370,72 @@ public class CoxAnalyticsPlugin extends Plugin
 						splitTicks = coxTimeVar();
 					}
 
-					splits += room + ": " + raidTime(roomTicks) + "<br>";
-					pointsPanel.setSplits(splits);
+					String formattedTime = raidTime(roomTicks);
+
+					recordSplit(room, formattedTime, "game");
 				}
 				else if (msg.contains("Olm phase") || msg.contains("Olm head"))
 				{
-					if (msg.contains("Total"))
+					String cleanMsg = msg.replace(" duration", "").trim();
+					String label;
+					String time;
+
+					if (cleanMsg.contains("Total"))
 					{
-						splits += msg.substring(0, msg.indexOf("Total")).replace(" duration", "").trim() + "<br>";
+						label = cleanMsg.substring(0, cleanMsg.indexOf("Total")).trim();
 					}
 					else
 					{
-						splits += msg.replace(" duration", "").trim() + "<br>";
+						label = cleanMsg;
 					}
 
-					pointsPanel.setSplits(splits);
+					// Most Olm messages are "Label: Time" or "Label Time"
+					// We'll split to ensure we get the time portion for the packet
+					time = label.substring(label.lastIndexOf(" ") + 1);
+					label = label.substring(0, label.lastIndexOf(" ")).trim();
+
+					// Remove trailing ":" if it exists, recordSplit will add it back as needed
+					if (label.endsWith(":"))
+					{
+						label = label.substring(0, label.length() - 1);
+					}
+
+					recordSplit(label, time, "game");
 				}
 				else if (msg.contains("level complete! Duration: "))
 				{
+					String floorLabel;
+					String floorTime;
+
 					if (msg.contains("Upper"))
 					{
 						upperTicks = coxTimeVar();
 						getFloorTimes();
-						splits += "Floor 1: " + upperFloorTime + "<br>";
+						floorLabel = "Floor 1";
+						floorTime = upperFloorTime;
 					}
 					else if (msg.contains("Middle"))
 					{
 						middleTicks = coxTimeVar();
 						getFloorTimes();
-						splits += "Floor 2: " + middleFloorTime + "<br>";
+						floorLabel = "Floor 2";
+						floorTime = middleFloorTime;
 					}
-					else if (msg.contains("Lower"))
+					else // Lower
 					{
 						lowerTicks = coxTimeVar();
 						olmStart = coxTimeVar();
 						getFloorTimes();
-						splits += middleTicks != -1 ? "Floor 3: " + lowerFloorTime + "<br>" : "Floor 2: " + lowerFloorTime + "<br>";
+						floorLabel = middleTicks != -1 ? "Floor 3" : "Floor 2";
+						floorTime = lowerFloorTime;
 					}
+
 					if (splitTicks != coxTimeVar())
 					{
 						splitTicks = coxTimeVar();
 					}
-					pointsPanel.setSplits(splits);
+
+					recordSplit(floorLabel, floorTime, "game");
 				}
 				else if (msg.startsWith(RAID_START_MESSAGE))
 				{
@@ -521,6 +561,82 @@ public class CoxAnalyticsPlugin extends Plugin
 			{
 				widget.setHidden(config.replaceWidget());
 			}
+		}
+	}
+
+	@Subscribe
+	public void onCoxTimePacket(CoxTimePacket packet)
+	{
+		log.info("Received CoX Party Packet: (Previous room: {} Room: {} Time: {})", packet.getLastRecordedRoomName(), packet.getRoomName(), packet.getTime());
+
+		if (!config.acceptPartySplits()) return;
+		// Either we have already recorded the split from a different party member,
+		// or we were logged in and recorded it ourselves
+		if (packet.getRoomName().equals(lastRecordedRoom)) return;
+
+		// Verify that the split we're receiving is from a team member in the same raid
+		if (!packet.getLastRecordedRoomName().equals(lastRecordedRoom)) return;
+
+		// Verify that the split we're receiving is accurate
+		// (person in the party saw the previous room, so the time between previous and current is correct)
+		if (!packet.getLastSeenRoomName().equals(lastRecordedRoom)) return;
+
+		recordSplit(packet.getRoomName(), packet.getTime(), "party");
+	}
+
+	private void recordSplit(String roomName, String formattedTime, String splitSource)
+	{
+		if (!validateSplit(formattedTime, splitSource))
+		{
+			// Update the last seen room even if the split was invalid, this will help validate the next time.
+			// This is only accessible if the splitSource == "game".
+			lastSeenRoom = roomName;
+			return;
+		}
+
+		addSplitToPanel(roomName, formattedTime, splitSource);
+		if (splitSource.equals("game")) {
+			sendSplitToParty(roomName, formattedTime);
+			lastSeenRoom = roomName;
+		}
+
+		lastRecordedRoom = roomName;
+	}
+
+	// When a user logs out and logs back in during a raid, or is not present in a room to see the end,
+	// they will see an incorrect room time that's equal to the total time or the sum of multiple missed room times.
+	// If the user is accepting party splits, we can wait for a party split instead to fix it.
+	private Boolean validateSplit(String formattedTime, String splitSource) {
+		// If the user is not accepting party splits, we take a possibly invalid split as it's better than nothing
+		if (!config.acceptPartySplits()) return true;
+		// If the source is already the party, it's inherently trusted
+		if (splitSource.equals("party")) return true;
+
+		// If the player saw the previous room time in game, the current room time will be accurate
+		if (lastRecordedRoom.equals(lastSeenRoom)) return true;
+
+		return false;
+	}
+
+	private void addSplitToPanel(String roomName, String formattedTime, String splitSource)
+	{
+		String entry = roomName + ": " + formattedTime + (splitSource.equals("party") ? " (party sync)" : "");
+		splits += entry + "<br>";
+
+		// Ensure the side panel reflects the change immediately
+		if (pointsPanel != null)
+		{
+			pointsPanel.setSplits(splits);
+		}
+	}
+
+	private void sendSplitToParty(String roomName, String formattedTime)
+	{
+		if (!config.sendPartySplits()) return;
+		// Broadcast to party so logged-out members get it
+		if (partyService.isInParty())
+		{
+			partyService.send(new CoxTimePacket(lastRecordedRoom, lastSeenRoom, roomName, formattedTime));
 		}
 	}
 
