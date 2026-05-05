@@ -210,23 +210,14 @@ public class CoxAnalyticsPlugin extends Plugin
 		overlayManager.remove(overlay);
 		clientThread.invoke(() -> hideWidget(false));
 		reset();
-		resetTimes();
+
+		wsClient.unregisterMessage(CoxTimePacket.class);
 	}
 
 	public void reset()
 	{
 		inCox = false;
-		upperTicks = -1;
-		middleTicks = -1;
-		lowerTicks = -1;
-		endTicks = -1;
-		upperFloorTime = "";
-		middleFloorTime = "";
-		lowerFloorTime = "";
-		olmTime = "";
-		olmPhase = 0;
-		splitTicks = 0;
-		mageStart = -1;
+		resetTimes();
 	}
 
 	public void resetTimes()
@@ -241,6 +232,7 @@ public class CoxAnalyticsPlugin extends Plugin
 		olmTime = "";
 		splits = "";
 		splitTicks = 0;
+		olmPhase = 0;
 		mageStart = -1;
 		lastRecordedRoom = "";
 		lastSeenRoom = "";
@@ -295,22 +287,15 @@ public class CoxAnalyticsPlugin extends Plugin
 	@Subscribe
 	public void onVarbitChanged(VarbitChanged e)
 	{
-		if (inCox && client.getVarbitValue(Varbits.IN_RAID) != 1)
-		{
-			reset();
-		}
-		else
-		{
-			inCox = client.getVarbitValue(Varbits.IN_RAID) == 1;
-		}
+		inCox = client.getVarbitValue(Varbits.IN_RAID) == 1;
 	}
 
 	@Subscribe
 	private void onGameStateChanged(GameStateChanged e)
 	{
-		if (e.getGameState() == GameState.LOGGED_IN && client.getLocalPlayer() != null && !inCox)
+		if (e.getGameState() == GameState.LOGGED_IN && client.getLocalPlayer() != null)
 		{
-			reset();
+			inCox = client.getVarbitValue(Varbits.IN_RAID) == 1;
 		}
 	}
 
@@ -594,6 +579,8 @@ public class CoxAnalyticsPlugin extends Plugin
 			return;
 		}
 
+		backfillFloorSplits(roomName, formattedTime, splitSource);
+
 		addSplitToPanel(roomName, formattedTime, splitSource);
 		if (splitSource.equals("game")) {
 			sendSplitToParty(roomName, formattedTime);
@@ -616,6 +603,28 @@ public class CoxAnalyticsPlugin extends Plugin
 		if (lastRecordedRoom.equals(lastSeenRoom)) return true;
 
 		return false;
+	}
+
+	// If we get a floor split from the party, update our tick variables so getFloorTimes() works.
+	private void backfillFloorSplits(String roomName, String formattedTime, String splitSource) {
+		if (splitSource.equals("party")) {
+			int ticks = parseTicks(formattedTime);
+			if (roomName.equals("Floor 1") && upperTicks == -1) {
+				upperTicks = ticks;
+			}
+			else if (roomName.equals("Floor 2") && middleTicks == -1) {
+				if (upperTicks != -1) {
+					middleTicks = upperTicks + ticks;
+					olmStart = middleTicks;
+				}
+			}
+			else if (roomName.equals("Floor 3") && lowerTicks == -1) {
+				if (middleTicks != -1) {
+					lowerTicks = middleTicks + ticks;
+					olmStart = lowerTicks;
+				}
+			}
+		}
 	}
 
 	private void addSplitToPanel(String roomName, String formattedTime, String splitSource)
@@ -720,6 +729,23 @@ public class CoxAnalyticsPlugin extends Plugin
 		int sec = tmp / 10;
 		int sec_tenth = tmp - sec * 10;
 		return min + (sec < 10 ? ":0" : ":") + sec + "." + sec_tenth;
+	}
+
+	private int parseTicks(String formattedTime) {
+		try {
+			String[] parts = formattedTime.split(":");
+			if (parts.length < 2) return 0;
+
+			int minutes = Integer.parseInt(parts[0]);
+			double seconds = Double.parseDouble(parts[1]);
+
+			double totalSeconds = (minutes * 60) + seconds;
+
+			return (int) Math.round(totalSeconds / 0.6);
+		} catch (Exception e) {
+			log.error("Failed to parse party split time: {}", formattedTime);
+			return 0;
+		}
 	}
 
 	public String getPointsPerHour(int points)
